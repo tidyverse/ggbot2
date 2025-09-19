@@ -1,1 +1,3 @@
 ^LICENSE\.md$
+\.vscode
+^ggbot2\.Rproj$
