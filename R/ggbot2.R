@@ -57,7 +57,7 @@ ggbot2 <- function(df = NULL, language = "English") {
   } else {
     # Load example datasets
     samples <- list()
-    for (dataset in c("mpg", "diamonds", "economics", "iris", "mtcars")) {
+    for (dataset in c("mtcars", "diamonds", "economics", "iris", "mtcars")) {
       df <- eval(parse(text = dataset))
       if (is.data.frame(df)) {
         samples <- c(
@@ -88,7 +88,7 @@ ggbot2 <- function(df = NULL, language = "English") {
   )
 
   ui <- page_sidebar(
-    title = "VoicePlot",
+    title = "ggbot2",
     fillable = TRUE,
     style = "--bslib-spacer: 1rem; padding-bottom: 0;",
     sidebar = sidebar(
@@ -135,7 +135,14 @@ ggbot2 <- function(df = NULL, language = "English") {
     append_transcript(greeting, clear = TRUE)
 
     run_r_plot_code <- function(code) {
+      attr(code, "rnd") <- runif(1) # Force re-evaluation even if code is the same
       last_code(code)
+
+      # Ideally we'd run the code here to check for errors and let the model
+      # know about success/failure in a tool response. But we only want to run
+      # this code once, and with the environment set up correctly as renderPlot
+      # does.
+      NULL
     }
 
     run_r_plot_code_tool <- ellmer::tool(
@@ -239,13 +246,22 @@ ggbot2 <- function(df = NULL, language = "English") {
 
     output$plot <- renderPlot(res = 96, {
       req(last_code())
-      result <- withVisible(eval(parse(text = last_code())))
-      session$sendCustomMessage("play_audio", list(selector = "#shutter"))
-      if (result$visible) {
-        result$value
-      } else {
-        invisible(result$value)
-      }
+      on.exit(session$sendCustomMessage(
+        "play_audio",
+        list(selector = "#shutter")
+      ))
+      tryCatch(
+        eval(parse(text = last_code()), envir = new.env(parent = globalenv())),
+        error = function(e) {
+          realtime_controls$send_text(
+            paste0(
+              "The R code you provided resulted in an error: ",
+              paste(collapse = "\n", conditionMessage(e))
+            )
+          )
+          stop(e)
+        }
+      )
     })
 
     output$code_text <- renderText({
