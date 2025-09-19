@@ -16,7 +16,7 @@ NULL
 #' the app will launch automatically.
 #'
 #' @export
-ggbot2 <- function(df = NULL, language = "English") {
+ggbot <- function(df = NULL) {
   # Read prompt file
   prompt <- paste(
     collapse = "\n",
@@ -57,7 +57,7 @@ ggbot2 <- function(df = NULL, language = "English") {
   } else {
     # Load example datasets
     samples <- list()
-    for (dataset in c("mtcars", "diamonds", "economics", "iris", "mtcars")) {
+    for (dataset in c("mtcars", "diamonds", "economics", "iris")) {
       df <- eval(parse(text = dataset))
       if (is.data.frame(df)) {
         samples <- c(
