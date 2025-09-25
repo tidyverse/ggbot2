@@ -45,7 +45,7 @@ You don't have to be precise with your commands to ggbot. For example, give it a
 
 ## Suggested prompts
 
-Here are the kinds of things you can say to databot:
+Here are the kinds of things you can say to ggbot:
 
 - "Create a scatter plot of mpg vs weight"
 - "Color by cylinder"
