@@ -18,3 +18,5 @@ _cache/
 ^revdep$
 ^\.claude$
 ^CLAUDE\.md$
+^.env$
+^.Renviron$

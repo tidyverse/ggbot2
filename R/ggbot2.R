@@ -1,9 +1,12 @@
 #' @import shiny
 #' @import bslib
 #' @import ellmer
+#' @import ggplot2
 #' @importFrom shinychat markdown_stream output_markdown_stream
 #' @importFrom shinyrealtime realtime_ui realtime_server
 NULL
+
+globalVariables("yield")
 
 #' Interactive Shiny app that generates ggplot2 plots from voice commands using
 #' GPT-4o Realtime.
@@ -11,81 +14,29 @@ NULL
 #' @param df Optional data frame to ask the assistant to use; must be a simple
 #' variable name, not an expression. If NULL, example datasets from ggplot2 and
 #' base R are provided.
+#' @param debug Logical; if TRUE, enables debug mode in shinyrealtime for
+#' (extremely) verbose logging.
 #'
 #' @return A Shiny app object. If this function is called from the R console,
 #' the app will launch automatically.
 #'
 #' @export
-ggbot <- function(df = NULL) {
-  # Read prompt file
-  prompt <- paste(
-    collapse = "\n",
-    readLines(system.file("prompt.md", package = "ggbot2"))
-  )
-
-  if (!missing(df)) {
-    df_name <- deparse(substitute(df))
-
-    if (!is.data.frame(df)) {
-      stop("df must be a data frame or NULL")
-    }
-
-    df_preview <- paste(
-      collapse = "\n",
-      capture.output(write.csv(head(df), ""))
-    )
-
-    withr::with_options(list(width = 1000), {
-      df_structure <- paste(
-        collapse = "\n",
-        capture.output(str(df))
-      )
-
-      df_summary <- paste(
-        collapse = "\n",
-        capture.output(summary(df))
-      )
-    })
-
-    # Include the first few rows of the provided dataset in the prompt
-    prompt <- paste0(
-      prompt,
-      interpolate(
-        "\n\nThe user has provided a data frame with the variable name `{{df_name}}`. Its first few rows look like this:\n\n{{df_preview}}\n\nIts summary looks like this:\n\n{{df_summary}}\n\nUnless explicitly told otherwise, assume the user wants you to use this data frame for plotting.",
-      )
-    )
-  } else {
-    # Load example datasets
-    samples <- list()
-    for (dataset in c("mtcars", "diamonds", "economics", "iris")) {
-      df <- eval(parse(text = dataset))
-      if (is.data.frame(df)) {
-        samples <- c(
-          samples,
-          paste0(
-            "## ",
-            dataset,
-            "\n\n",
-            capture.output(write.csv(head(df), "")),
-            collapse = "\n"
-          )
-        )
-      }
-    }
-
-    prompt <- paste0(
-      prompt,
-      "\n\n# Available Datasets\n\n",
-      paste(samples, collapse = "\n\n")
+ggbot <- function(df, debug = FALSE) {
+  if (missing(df)) {
+    cli::cli_abort(
+      "ggbot() requires a data frame variable to be provided as the `df` argument."
     )
   }
 
-  prompt <- paste0(
-    prompt,
-    "\n\nImportant: Respond only in ",
-    language,
-    "."
-  )
+  df_name <- deparse(substitute(df))
+
+  if (!is.data.frame(df)) {
+    cli::cli_abort("df must be a data frame or NULL")
+  }
+
+  ensure_openai_api_key()
+
+  prompt <- build_prompt(df, df_name)
 
   ui <- page_sidebar(
     title = "ggbot2",
@@ -135,7 +86,7 @@ ggbot <- function(df = NULL) {
     append_transcript(greeting, clear = TRUE)
 
     run_r_plot_code <- function(code) {
-      attr(code, "rnd") <- runif(1) # Force re-evaluation even if code is the same
+      attr(code, "rnd") <- stats::runif(1) # Force re-evaluation even if code is the same
       last_code(code)
 
       # Ideally we'd run the code here to check for errors and let the model
@@ -160,11 +111,12 @@ ggbot <- function(df = NULL) {
       voice = "cedar",
       instructions = prompt,
       tools = list(run_r_plot_code_tool),
-      speed = 1.1
+      speed = 1.1,
+      debug = debug
     )
 
     # Handle function call start - show notification
-    realtime_controls$on("conversation.item.added", \(event) {
+    realtime_controls$on("conversation.item.added", function(event) {
       if (event$item$type == "function_call") {
         shiny::showNotification(
           "Generating code, please wait...",
@@ -175,23 +127,26 @@ ggbot <- function(df = NULL) {
     })
 
     # Handle function call completion - remove notification
-    realtime_controls$on("conversation.item.done", \(event) {
+    realtime_controls$on("conversation.item.done", function(event) {
       if (event$item$type == "function_call") {
         shiny::removeNotification(id = event$item$id)
       }
     })
 
     # Handle new messages - clear transcript
-    realtime_controls$on("response.created", \(event) {
+    realtime_controls$on("response.created", function(event) {
       append_transcript("", clear = TRUE)
     })
 
     # Handle text streaming
-    realtime_controls$on("response.output_audio_transcript.delta", \(event) {
-      append_transcript(event$delta)
-    })
+    realtime_controls$on(
+      "response.output_audio_transcript.delta",
+      function(event) {
+        append_transcript(event$delta)
+      }
+    )
 
-    realtime_controls$on("response.done", \(event) {
+    realtime_controls$on("response.done", function(event) {
       # "usage": {
       #   "total_tokens": 1977,
       #   "input_tokens": 1687,
@@ -253,12 +208,15 @@ ggbot <- function(df = NULL) {
       tryCatch(
         eval(parse(text = last_code()), envir = new.env(parent = globalenv())),
         error = function(e) {
-          realtime_controls$send_text(
-            paste0(
-              "The R code you provided resulted in an error: ",
-              paste(collapse = "\n", conditionMessage(e))
-            )
-          )
+          # This seems like it would be helpful, but when we send this, it seems
+          # to effectively end the conversation.
+          #
+          # realtime_controls$send_text(
+          #   paste0(
+          #     "The R code you provided resulted in an error: ",
+          #     paste(collapse = "\n", conditionMessage(e))
+          #   )
+          # )
           stop(e)
         }
       )
@@ -286,5 +244,93 @@ hidden_audio_el <- function(id, file_path, media_type = "audio/mp3") {
     src = data_uri,
     style = "display:none;",
     preload = "auto"
+  )
+}
+
+#' Ensure OPENAI_API_KEY is available in the environment
+#'
+#' Checks for OPENAI_API_KEY environment variable and attempts to load it
+#' from .Renviron or .env files if not found.
+#'
+#' @return Invisibly returns TRUE if API key is available
+#' @keywords internal
+ensure_openai_api_key <- function() {
+  if (Sys.getenv("OPENAI_API_KEY") == "") {
+    if (
+      file.exists(".Renviron") &&
+        length(grep("^OPENAI_API_KEY=", readLines(".Renviron"))) > 0
+    ) {
+      cli::cli_abort(
+        c(
+          "OPENAI_API_KEY found in .Renviron but not in environment.",
+          "i" = "Please restart your R session to load environment variables from .Renviron."
+        )
+      )
+    }
+    if (
+      file.exists(".env") &&
+        length(grep("^OPENAI_API_KEY=", readLines(".env"))) > 0
+    ) {
+      dotenv::load_dot_env(".env")
+      cli::cli_inform(
+        c(
+          "Found .env file; loading environment variables from .env.",
+          "i" = "You can avoid this message by calling library(dotenv) before ggbot()."
+        )
+      )
+    }
+    if (Sys.getenv("OPENAI_API_KEY") == "") {
+      cli::cli_abort(
+        c(
+          "OPENAI_API_KEY environment variable is not set.",
+          "i" = "You can set it with Sys.setenv(OPENAI_API_KEY = 'your_api_key') or by adding it to a .Renviron or .env file."
+        )
+      )
+    }
+  }
+  
+  invisible(TRUE)
+}
+
+#' Build prompt with data frame information
+#'
+#' Reads the base prompt from the package and incorporates data frame preview,
+#' structure, and summary information.
+#'
+#' @param df Data frame to analyze and include in the prompt
+#' @param df_name Character string with the variable name of the data frame
+#'
+#' @return Character string containing the complete prompt
+#' @keywords internal
+build_prompt <- function(df, df_name) {
+  # Read prompt file
+  prompt <- paste(
+    collapse = "\n",
+    readLines(system.file("prompts/prompt.md", package = "ggbot2"))
+  )
+
+  df_preview <- paste(
+    collapse = "\n",
+    utils::capture.output(utils::write.csv(utils::head(df), ""))
+  )
+
+  withr::with_options(list(width = 1000), {
+    df_structure <- paste(
+      collapse = "\n",
+      utils::capture.output(utils::str(df))
+    )
+
+    df_summary <- paste(
+      collapse = "\n",
+      utils::capture.output(summary(df))
+    )
+  })
+
+  # Include the first few rows of the provided dataset in the prompt
+  paste0(
+    prompt,
+    interpolate(
+      "\n\nThe user has provided a data frame with the variable name `{{df_name}}`. Its first few rows look like this:\n\n{{df_preview}}\n\nIts summary looks like this:\n\n{{df_summary}}\n\nUnless explicitly told otherwise, assume the user wants you to use this data frame for plotting.",
+    )
   )
 }

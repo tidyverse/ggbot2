@@ -3,6 +3,7 @@
 export(ggbot)
 import(bslib)
 import(ellmer)
+import(ggplot2)
 import(shiny)
 importFrom(shinychat,markdown_stream)
 importFrom(shinychat,output_markdown_stream)

@@ -7,13 +7,19 @@ Description: Interactive Shiny app that generates ggplot2 plots from voice comma
 Depends:
     ggplot2
 Imports:
+    base64enc,
     bslib,
+    cli,
+    coro,
     dotenv,
     ellmer,
     shiny,
     shinychat,
-    shinyrealtime,
-    dplyr
+    shinyrealtime (>= 0.1.0.9000),
+    withr
+Suggests:
+    dplyr,
+    maps
 Remotes:
     posit-dev/shinyrealtime/pkg-r
 License: MIT + file LICENSE

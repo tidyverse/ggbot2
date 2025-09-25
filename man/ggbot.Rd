@@ -5,12 +5,15 @@
 \title{Interactive Shiny app that generates ggplot2 plots from voice commands using
 GPT-4o Realtime.}
 \usage{
-ggbot(df = NULL, language = "English")
+ggbot(df, debug = FALSE)
 }
 \arguments{
 \item{df}{Optional data frame to ask the assistant to use; must be a simple
 variable name, not an expression. If NULL, example datasets from ggplot2 and
 base R are provided.}
+
+\item{debug}{Logical; if TRUE, enables debug mode in shinyrealtime for
+(extremely) verbose logging.}
 }
 \value{
 A Shiny app object. If this function is called from the R console,
