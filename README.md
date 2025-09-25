@@ -32,10 +32,8 @@ pak::pak("tidyverse/ggbot2")
 To launch ggbot, simply call the `ggbot()` function, passing in the name of a data frame variable:
 
 ```r
-ggbot2::ggbot(penguins)
+ggbot2::ggbot(mtcars)
 ```
-
-If you don't have a specific data frame in mind, you can call `ggbot()` without any arguments, and ask it to plot "mtcars", "diamonds", "economics", or "iris".
 
 ## Act natural
 
