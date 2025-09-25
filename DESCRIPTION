@@ -12,7 +12,7 @@ Imports:
     cli,
     coro,
     dotenv,
-    ellmer,
+    ellmer (>= 0.3.0),
     shiny,
     shinychat,
     shinyrealtime (>= 0.1.0.9000),
