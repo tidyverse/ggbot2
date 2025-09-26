@@ -1,4 +1,4 @@
-# ggbot2
+# ggbot2 <img src="man/figures/logo.png" align="right" height="134" alt="" />
 
 <!-- badges: start -->
 
