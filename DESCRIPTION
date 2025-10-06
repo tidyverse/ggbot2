@@ -15,6 +15,7 @@ Imports:
     ellmer (>= 0.3.0),
     shiny,
     shinychat,
+    shinyjs,
     shinyrealtime (>= 0.1.0.9000),
     withr
 Suggests:

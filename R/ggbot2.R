@@ -43,8 +43,13 @@ ggbot <- function(df, debug = FALSE) {
     title = "ggbot2",
     fillable = TRUE,
     style = "--bslib-spacer: 1rem; padding-bottom: 0;",
+    shinyjs::useShinyjs(),
     sidebar = sidebar(
-      helpText("Session cost:", textOutput("session_cost", inline = TRUE)),
+      div(
+        style = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;",
+        helpText("Session cost:", textOutput("session_cost", inline = TRUE)),
+        input_dark_mode(id = "dark_mode", mode = "light")
+      ),
       output_markdown_stream("response_text")
     ),
     card(
@@ -52,7 +57,13 @@ ggbot <- function(df, debug = FALSE) {
       card_header(
         "Plot",
         class = "d-flex justify-content-between align-items-center",
-        downloadButton("download_plot", "Download PNG", class = "btn-sm")
+        div(
+          style = "display: flex; gap: 0.5rem;",
+          actionButton("history_prev", icon("chevron-left"), class = "btn-sm"),
+          textOutput("history_info", inline = TRUE),
+          actionButton("history_next", icon("chevron-right"), class = "btn-sm"),
+          downloadButton("download_plot", "Download", class = "btn-sm")
+        )
       ),
       card_body(
         padding = 0,
@@ -92,6 +103,10 @@ ggbot <- function(df, debug = FALSE) {
     plot_type <- reactiveVal("static") # "static" or "plotly"
     running_cost <- reactiveVal(0) # Cost of tokens used in the session, in dollars
 
+    # History system
+    plot_history <- reactiveVal(list()) # List of history items: list(code, plot_type, timestamp)
+    history_position <- reactiveVal(0) # 0 = latest/live, 1 = one back, etc.
+
     greeting <- "Welcome to ggbot2!\n\nClick the mic button to start talking. You can also click-and-hold the mic button (or hold spacebar) for push-to-talk mode."
 
     append_transcript <- function(text, clear = FALSE) {
@@ -111,6 +126,12 @@ ggbot <- function(df, debug = FALSE) {
       last_code(code)
       last_plotly_code(NULL)
 
+      # Add to history
+      history <- plot_history()
+      history <- c(list(list(code = code, plot_type = "static", timestamp = Sys.time())), history)
+      plot_history(history)
+      history_position(0) # Reset to latest
+
       # Ideally we'd run the code here to check for errors and let the model
       # know about success/failure in a tool response. But we only want to run
       # this code once, and with the environment set up correctly as renderPlot
@@ -123,6 +144,13 @@ ggbot <- function(df, debug = FALSE) {
       plot_type("plotly")
       last_plotly_code(code)
       last_code(NULL)
+
+      # Add to history
+      history <- plot_history()
+      history <- c(list(list(code = code, plot_type = "plotly", timestamp = Sys.time())), history)
+      plot_history(history)
+      history_position(0) # Reset to latest
+
       NULL
     }
 
@@ -239,6 +267,76 @@ ggbot <- function(df, debug = FALSE) {
       output_audio = 20 / 1e6
     )
 
+    # History navigation
+    observeEvent(input$history_prev, {
+      pos <- history_position()
+      history <- plot_history()
+      if (pos < length(history) - 1) {
+        new_pos <- pos + 1
+        history_position(new_pos)
+        # Load plot from history
+        item <- history[[new_pos + 1]] # +1 because R is 1-indexed
+        if (item$plot_type == "static") {
+          plot_type("static")
+          last_code(item$code)
+          last_plotly_code(NULL)
+        } else {
+          plot_type("plotly")
+          last_plotly_code(item$code)
+          last_code(NULL)
+        }
+      }
+    })
+
+    observeEvent(input$history_next, {
+      pos <- history_position()
+      if (pos > 0) {
+        new_pos <- pos - 1
+        history_position(new_pos)
+        # Load plot from history
+        history <- plot_history()
+        item <- history[[new_pos + 1]] # +1 because R is 1-indexed
+        if (item$plot_type == "static") {
+          plot_type("static")
+          last_code(item$code)
+          last_plotly_code(NULL)
+        } else {
+          plot_type("plotly")
+          last_plotly_code(item$code)
+          last_code(NULL)
+        }
+      }
+    })
+
+    # Update button states
+    observe({
+      pos <- history_position()
+      history <- plot_history()
+
+      # Disable prev if at oldest plot
+      if (pos >= length(history) - 1 || length(history) <= 1) {
+        shinyjs::disable("history_prev")
+      } else {
+        shinyjs::enable("history_prev")
+      }
+
+      # Disable next if at newest plot
+      if (pos <= 0) {
+        shinyjs::disable("history_next")
+      } else {
+        shinyjs::enable("history_next")
+      }
+    })
+
+    output$history_info <- renderText({
+      pos <- history_position()
+      history <- plot_history()
+      if (length(history) == 0) {
+        return("")
+      }
+      paste0((pos + 1), "/", length(history))
+    })
+
     output$plot_container <- renderUI({
       if (plot_type() == "plotly") {
         req(last_plotly_code())
@@ -308,7 +406,9 @@ ggbot <- function(df, debug = FALSE) {
 
     output$download_plot <- downloadHandler(
       filename = function() {
-        paste0("ggbot_plot_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".png")
+        current_plot_type <- isolate(plot_type())
+        extension <- if (current_plot_type == "plotly") ".html" else ".png"
+        paste0("ggbot_plot_", format(Sys.time(), "%Y%m%d_%H%M%S"), extension)
       },
       content = function(file) {
         current_plot_type <- isolate(plot_type())
@@ -350,50 +450,13 @@ ggbot <- function(df, debug = FALSE) {
             stop("plotly package is required")
           }
 
-          # For plotly, we need to use kaleido for export
+          if (!requireNamespace("htmlwidgets", quietly = TRUE)) {
+            stop("htmlwidgets package is required to save interactive plots")
+          }
+
+          # Save interactive plotly as HTML to preserve interactivity
           plotly_obj <- eval(parse(text = code), envir = new.env(parent = globalenv()))
-
-          # Try kaleido first (modern approach)
-          kaleido_worked <- FALSE
-          if (requireNamespace("kaleido", quietly = TRUE)) {
-            tryCatch({
-              kaleido::save_image(plotly_obj, file, width = 3000, height = 2400)
-              kaleido_worked <- TRUE
-            }, error = function(e) {
-              warning("kaleido export failed: ", e$message)
-            })
-          }
-
-          # If kaleido didn't work, try plotly's built-in save_image
-          if (!kaleido_worked) {
-            tryCatch({
-              # plotly::save_image uses kaleido under the hood
-              plotly::save_image(plotly_obj, file, width = 3000, height = 2400)
-            }, error = function(e1) {
-              # Last fallback: use webshot
-              if (requireNamespace("webshot2", quietly = TRUE) || requireNamespace("webshot", quietly = TRUE)) {
-                temp_html <- tempfile(fileext = ".html")
-                tryCatch({
-                  if (!requireNamespace("htmlwidgets", quietly = TRUE)) {
-                    stop("htmlwidgets package is required for this export method")
-                  }
-                  htmlwidgets::saveWidget(plotly_obj, temp_html, selfcontained = TRUE)
-                  if (requireNamespace("webshot2", quietly = TRUE)) {
-                    webshot2::webshot(temp_html, file, vwidth = 3000, vheight = 2400)
-                  } else {
-                    webshot::webshot(temp_html, file, vwidth = 3000, vheight = 2400)
-                  }
-                }, finally = {
-                  if (file.exists(temp_html)) {
-                    unlink(temp_html)
-                  }
-                })
-              } else {
-                stop("Cannot export plotly plot to PNG. Please install one of: kaleido, webshot2, or webshot.\n",
-                     "Recommended: install.packages('kaleido')")
-              }
-            })
-          }
+          htmlwidgets::saveWidget(plotly_obj, file, selfcontained = TRUE)
         } else {
           stop("No plot available to download. Please generate a plot first.")
         }
