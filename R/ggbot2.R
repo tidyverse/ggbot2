@@ -4,6 +4,7 @@
 #' @import ggplot2
 #' @importFrom shinychat markdown_stream output_markdown_stream
 #' @importFrom shinyrealtime realtime_ui realtime_server
+#' @importFrom grDevices png dev.off
 NULL
 
 globalVariables("yield")
@@ -48,8 +49,15 @@ ggbot <- function(df, debug = FALSE) {
     ),
     card(
       full_screen = TRUE,
-      card_header("Plot"),
-      card_body(padding = 0, plotOutput("plot", fill = TRUE)),
+      card_header(
+        "Plot",
+        class = "d-flex justify-content-between align-items-center",
+        downloadButton("download_plot", "Download PNG", class = "btn-sm")
+      ),
+      card_body(
+        padding = 0,
+        uiOutput("plot_container")
+      ),
       height = "66%"
     ),
     layout_columns(
@@ -65,14 +73,26 @@ ggbot <- function(df, debug = FALSE) {
       style = "z-index: 100000; margin-left: auto; margin-right: auto;",
       right = NULL
     ),
-    hidden_audio_el("shutter", system.file("shutter.mp3", package = "ggbot2"))
+    hidden_audio_el("shutter", system.file("shutter.mp3", package = "ggbot2")),
+    tags$script(HTML("
+      // Fix initial mic button state to match muted status
+      setTimeout(function() {
+        var micBtn = document.querySelector('.mic-toggle-btn');
+        if (micBtn) {
+          micBtn.classList.remove('active', 'btn-danger');
+          micBtn.classList.add('btn-secondary');
+        }
+      }, 100);
+    "))
   )
 
   server <- function(input, output, session) {
     last_code <- reactiveVal()
+    last_plotly_code <- reactiveVal()
+    plot_type <- reactiveVal("static") # "static" or "plotly"
     running_cost <- reactiveVal(0) # Cost of tokens used in the session, in dollars
 
-    greeting <- "Welcome to Shiny Realtime!\n\nYou're currently muted; click the mic button to unmute, click-and-hold the mic for push-to-talk, or hold the spacebar key for push-to-talk."
+    greeting <- "Welcome to ggbot2!\n\nClick the mic button to start talking. You can also click-and-hold the mic button (or hold spacebar) for push-to-talk mode."
 
     append_transcript <- function(text, clear = FALSE) {
       markdown_stream(
@@ -87,12 +107,22 @@ ggbot <- function(df, debug = FALSE) {
 
     run_r_plot_code <- function(code) {
       attr(code, "rnd") <- stats::runif(1) # Force re-evaluation even if code is the same
+      plot_type("static")
       last_code(code)
+      last_plotly_code(NULL)
 
       # Ideally we'd run the code here to check for errors and let the model
       # know about success/failure in a tool response. But we only want to run
       # this code once, and with the environment set up correctly as renderPlot
       # does.
+      NULL
+    }
+
+    run_r_plotly_code <- function(code) {
+      attr(code, "rnd") <- stats::runif(1) # Force re-evaluation even if code is the same
+      plot_type("plotly")
+      last_plotly_code(code)
+      last_code(NULL)
       NULL
     }
 
@@ -106,11 +136,21 @@ ggbot <- function(df, debug = FALSE) {
       )
     )
 
+    run_r_plotly_code_tool <- ellmer::tool(
+      run_r_plotly_code,
+      "Run R code that generates an interactive plotly plot",
+      arguments = list(
+        code = type_string(
+          "The R code to run that generates an interactive plotly plot. This should use plotly::ggplotly() to convert a ggplot object to plotly, or use plotly functions directly. The last expression should be the plotly object."
+        )
+      )
+    )
+
     realtime_controls <- realtime_server(
       "realtime1",
       voice = "cedar",
       instructions = prompt,
-      tools = list(run_r_plot_code_tool),
+      tools = list(run_r_plot_code_tool, run_r_plotly_code_tool),
       speed = 1.1,
       debug = debug
     )
@@ -199,8 +239,29 @@ ggbot <- function(df, debug = FALSE) {
       output_audio = 20 / 1e6
     )
 
+    output$plot_container <- renderUI({
+      if (plot_type() == "plotly") {
+        req(last_plotly_code())
+        if (!requireNamespace("plotly", quietly = TRUE)) {
+          stop("plotly package is required for interactive plots. Install it with install.packages('plotly')")
+        }
+        tagList(
+          plotly::plotlyOutput("interactive_plot", width = "100%", height = "100%"),
+          tags$script(HTML("
+            setTimeout(function() {
+              var audio = document.getElementById('shutter');
+              if (audio) audio.play();
+            }, 500);
+          "))
+        )
+      } else {
+        plotOutput("plot", fill = TRUE, width = "100%", height = "100%")
+      }
+    })
+
     output$plot <- renderPlot(res = 96, {
       req(last_code())
+      req(plot_type() == "static")
       on.exit(session$sendCustomMessage(
         "play_audio",
         list(selector = "#shutter")
@@ -222,14 +283,122 @@ ggbot <- function(df, debug = FALSE) {
       )
     })
 
+    output$interactive_plot <- plotly::renderPlotly({
+      req(last_plotly_code())
+      req(plot_type() == "plotly")
+      if (!requireNamespace("plotly", quietly = TRUE)) {
+        stop("plotly package is required for interactive plots")
+      }
+      eval(parse(text = last_plotly_code()), envir = new.env(parent = globalenv()))
+    })
+
     output$code_text <- renderText({
-      req(last_code())
-      last_code()
+      if (plot_type() == "static") {
+        req(last_code())
+        last_code()
+      } else {
+        req(last_plotly_code())
+        last_plotly_code()
+      }
     })
 
     output$session_cost <- renderText({
       paste0(sprintf("$%.4f", running_cost()))
     })
+
+    output$download_plot <- downloadHandler(
+      filename = function() {
+        paste0("ggbot_plot_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".png")
+      },
+      content = function(file) {
+        current_plot_type <- isolate(plot_type())
+
+        if (current_plot_type == "static") {
+          code <- isolate(last_code())
+
+          if (is.null(code) || code == "") {
+            stop("No plot available to download. Please generate a plot first.")
+          }
+
+          # 300 DPI with typical plot size (10" x 8")
+          grDevices::png(file, width = 3000, height = 2400, res = 300)
+          tryCatch({
+            result <- eval(parse(text = code), envir = new.env(parent = globalenv()))
+            # Explicitly print if it's a ggplot object
+            if (inherits(result, "ggplot")) {
+              print(result)
+            }
+          }, error = function(e) {
+            if (length(grDevices::dev.list()) > 0) {
+              grDevices::dev.off()
+            }
+            stop("Error generating plot: ", e$message)
+          }, finally = {
+            if (length(grDevices::dev.list()) > 0) {
+              grDevices::dev.off()
+            }
+          })
+
+        } else if (current_plot_type == "plotly") {
+          code <- isolate(last_plotly_code())
+
+          if (is.null(code) || code == "") {
+            stop("No plot available to download. Please generate a plot first.")
+          }
+
+          if (!requireNamespace("plotly", quietly = TRUE)) {
+            stop("plotly package is required")
+          }
+
+          # For plotly, we need to use kaleido for export
+          plotly_obj <- eval(parse(text = code), envir = new.env(parent = globalenv()))
+
+          # Try kaleido first (modern approach)
+          kaleido_worked <- FALSE
+          if (requireNamespace("kaleido", quietly = TRUE)) {
+            tryCatch({
+              kaleido::save_image(plotly_obj, file, width = 3000, height = 2400)
+              kaleido_worked <- TRUE
+            }, error = function(e) {
+              warning("kaleido export failed: ", e$message)
+            })
+          }
+
+          # If kaleido didn't work, try plotly's built-in save_image
+          if (!kaleido_worked) {
+            tryCatch({
+              # plotly::save_image uses kaleido under the hood
+              plotly::save_image(plotly_obj, file, width = 3000, height = 2400)
+            }, error = function(e1) {
+              # Last fallback: use webshot
+              if (requireNamespace("webshot2", quietly = TRUE) || requireNamespace("webshot", quietly = TRUE)) {
+                temp_html <- tempfile(fileext = ".html")
+                tryCatch({
+                  if (!requireNamespace("htmlwidgets", quietly = TRUE)) {
+                    stop("htmlwidgets package is required for this export method")
+                  }
+                  htmlwidgets::saveWidget(plotly_obj, temp_html, selfcontained = TRUE)
+                  if (requireNamespace("webshot2", quietly = TRUE)) {
+                    webshot2::webshot(temp_html, file, vwidth = 3000, vheight = 2400)
+                  } else {
+                    webshot::webshot(temp_html, file, vwidth = 3000, vheight = 2400)
+                  }
+                }, finally = {
+                  if (file.exists(temp_html)) {
+                    unlink(temp_html)
+                  }
+                })
+              } else {
+                stop("Cannot export plotly plot to PNG. Please install one of: kaleido, webshot2, or webshot.\n",
+                     "Recommended: install.packages('kaleido')")
+              }
+            })
+          }
+        } else {
+          stop("No plot available to download. Please generate a plot first.")
+        }
+      }
+    )
   }
 
   shinyApp(ui, server)
