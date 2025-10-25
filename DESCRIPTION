@@ -1,11 +1,9 @@
-Package: ggbot2
-Title: Voice Assistant for ggplot2
+Package: diagrambot
+Title: Voice Assistant for Mermaid and Graphviz Diagrams
 Version: 0.0.0.9000
 Authors@R: 
     person("First", "Last", , "first.last@example.com", role = c("aut", "cre"))
-Description: Interactive Shiny app that generates ggplot2 plots from voice commands using GPT-4o Realtime.
-Depends:
-    ggplot2
+Description: Interactive Shiny app that generates Mermaid and Graphviz diagrams from voice commands using GPT-4o Realtime. Supports flowcharts, sequence diagrams, network graphs, organizational charts, and more.
 Imports:
     base64enc,
     bslib,
@@ -13,13 +11,15 @@ Imports:
     coro,
     dotenv,
     ellmer (>= 0.3.0),
+    htmltools,
+    htmlwidgets,
+    jsonlite,
     shiny,
     shinychat,
     shinyrealtime (>= 0.1.0.9000),
     withr
 Suggests:
-    dplyr,
-    maps
+    dplyr
 Remotes:
     posit-dev/shinyrealtime/pkg-r
 License: MIT + file LICENSE
