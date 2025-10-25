@@ -131,7 +131,18 @@ function renderMermaidDiagram(elementId, code, retryCount = 0) {
       }, 100);
     }).catch((error) => {
       console.error('Mermaid rendering error:', error);
-      element.innerHTML = '<div class="alert alert-danger">Error rendering Mermaid diagram: ' + error.message + '</div>';
+      let errorMsg = 'Error rendering Mermaid diagram: ' + error.message;
+      
+      // Provide helpful hints based on common errors
+      if (error.message.includes('Parse error')) {
+        errorMsg += '<br><br><strong>Common fixes:</strong><ul>' +
+          '<li>Make sure each node and connection is on a separate line</li>' +
+          '<li>Quote labels with special characters: A["Label (text)"]</li>' +
+          '<li>Avoid chaining statements like A-->B.B-->C</li>' +
+          '<li>Try asking the AI to "fix the syntax errors" or "regenerate with proper line breaks"</li></ul>';
+      }
+      
+      element.innerHTML = '<div class="alert alert-danger" style="padding: 15px;">' + errorMsg + '</div>';
     });
     
   } catch (error) {
@@ -200,7 +211,18 @@ function renderGraphvizDiagram(elementId, code, retryCount = 0) {
         }, 100);
       } catch (error) {
         console.error('Graphviz rendering error:', error);
-        element.innerHTML = '<div class="alert alert-danger">Error rendering Graphviz diagram: ' + error.message + '</div>';
+        let errorMsg = 'Error rendering Graphviz diagram: ' + error.message;
+        
+        // Provide helpful hints based on common errors
+        if (error.message.includes('syntax error')) {
+          errorMsg += '<br><br><strong>Common fixes:</strong><ul>' +
+            '<li>Check for missing semicolons after node/edge declarations</li>' +
+            '<li>Ensure proper DOT syntax: node1 -> node2;</li>' +
+            '<li>Quote labels with special characters: [label="Text (with parens)"]</li>' +
+            '<li>Try asking the AI to "fix the Graphviz syntax" or "regenerate"</li></ul>';
+        }
+        
+        element.innerHTML = '<div class="alert alert-danger" style="padding: 15px;">' + errorMsg + '</div>';
       }
     }).catch(function(error) {
       console.error('Graphviz initialization error:', error);

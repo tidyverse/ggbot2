@@ -26,6 +26,23 @@ For Mermaid diagrams, always start with the diagram type declaration (e.g., `gra
 - Example: Use `B["API Server (REST)"]` NOT `B[API Server (REST)]`
 - When in doubt, always quote your labels to prevent parse errors
 - This applies to all Mermaid diagram types: flowcharts, sequence diagrams, class diagrams, etc.
+- **CRITICAL**: Each node definition and connection MUST be on a separate line
+- Example of CORRECT syntax:
+  ```
+  graph TD
+  A["Start"]
+  B["Input"]
+  C{"Is input valid?"}
+  A --> B
+  B --> C
+  ```
+- Example of INCORRECT syntax (will cause parse errors):
+  ```
+  graph TD
+  A["Start"] --> B["Input"].B --> C{"Is input valid?"}
+  ```
+- Put each node definition on its own line, then define connections separately or one per line
+- Use proper line breaks - never chain multiple statements with periods or on the same line
 
 For Graphviz diagrams, use proper DOT syntax with appropriate graph types (digraph, graph) and node/edge declarations.
 
