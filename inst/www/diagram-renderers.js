@@ -51,6 +51,17 @@ $(document).ready(function() {
   } else {
     window.graphvizReady = true;
   }
+  
+  // Load svg-pan-zoom for better diagram interaction
+  if (typeof svgPanZoom === 'undefined') {
+    $.getScript('https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js')
+      .done(function() {
+        console.log('svg-pan-zoom loaded successfully');
+      })
+      .fail(function() {
+        console.warn('Failed to load svg-pan-zoom library');
+      });
+  }
 });
 
 // Function to render Mermaid diagrams with retry logic
@@ -98,6 +109,26 @@ function renderMermaidDiagram(elementId, code, retryCount = 0) {
       nodes: [mermaidDiv]
     }).then(() => {
       console.log('Mermaid diagram rendered successfully');
+      
+      // Add pan and zoom capabilities if svg-pan-zoom is available
+      setTimeout(() => {
+        const svg = mermaidDiv.querySelector('svg');
+        if (svg && typeof svgPanZoom !== 'undefined') {
+          // Make sure SVG has proper dimensions
+          svg.style.width = '100%';
+          svg.style.height = '100%';
+          
+          svgPanZoom(svg, {
+            zoomEnabled: true,
+            controlIconsEnabled: true,
+            fit: true,
+            center: true,
+            minZoom: 0.1,
+            maxZoom: 10,
+            zoomScaleSensitivity: 0.3
+          });
+        }
+      }, 100);
     }).catch((error) => {
       console.error('Mermaid rendering error:', error);
       element.innerHTML = '<div class="alert alert-danger">Error rendering Mermaid diagram: ' + error.message + '</div>';
@@ -148,11 +179,25 @@ function renderGraphvizDiagram(elementId, code, retryCount = 0) {
       try {
         const svg = viz.renderSVGElement(code);
         // Style the SVG to fit the container
-        svg.style.maxWidth = '100%';
-        svg.style.maxHeight = '100%';
-        svg.style.height = 'auto';
+        svg.style.width = '100%';
+        svg.style.height = '100%';
         graphvizDiv.appendChild(svg);
         console.log('Graphviz diagram rendered successfully');
+        
+        // Add pan and zoom capabilities if svg-pan-zoom is available
+        setTimeout(() => {
+          if (typeof svgPanZoom !== 'undefined') {
+            svgPanZoom(svg, {
+              zoomEnabled: true,
+              controlIconsEnabled: true,
+              fit: true,
+              center: true,
+              minZoom: 0.1,
+              maxZoom: 10,
+              zoomScaleSensitivity: 0.3
+            });
+          }
+        }, 100);
       } catch (error) {
         console.error('Graphviz rendering error:', error);
         element.innerHTML = '<div class="alert alert-danger">Error rendering Graphviz diagram: ' + error.message + '</div>';
