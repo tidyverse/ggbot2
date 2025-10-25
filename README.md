@@ -7,7 +7,7 @@ experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](h
 
 <!-- badges: end -->
 
-diagrambot is a voice assistant for creating Mermaid and Graphviz diagrams. It helps you generate flowcharts, sequence diagrams, network graphs, organizational charts, and more using voice commands and AI. diagrambot supports both Mermaid syntax for a wide variety of structured diagrams and Graphviz/DOT syntax for complex network and hierarchical visualizations. diagrambot is a fork of [ggbot2](https://github.com/tidyverse/ggbot2/) from [Posit](https://posit.co/).
+diagrambot is an interactive Shiny app for creating Mermaid and Graphviz diagrams using AI. It helps you generate flowcharts, sequence diagrams, network graphs, organizational charts, and more through both voice commands (using GPT-4o Realtime) and text chat interfaces. diagrambot supports both Mermaid syntax for a wide variety of structured diagrams and Graphviz/DOT syntax for complex network and hierarchical visualizations. diagrambot is a fork of [ggbot2](https://github.com/tidyverse/ggbot2/) from [Posit](https://posit.co/).
 
 ## Prerequisites
 
