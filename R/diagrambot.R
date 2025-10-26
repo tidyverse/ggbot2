@@ -33,6 +33,145 @@ globalVariables(c(
   "removeModal"
 ))
 
+# Helper Functions --------------------------------------------------------
+
+#' Render a Mermaid diagram
+#'
+#' @param code The Mermaid diagram code
+#' @return HTML tags for rendering the diagram
+#' @keywords internal
+render_mermaid <- function(code) {
+  diagram_id <- paste0("mermaid-", sample(10000:99999, 1))
+  tags$div(
+    id = diagram_id,
+    style = "width: 100%; height: 100%; min-height: 400px;",
+    tags$script(HTML(paste0(
+      "setTimeout(function() { renderMermaidDiagram('",
+      diagram_id,
+      "', `",
+      gsub("`", "\\`", code),
+      "`); }, 500);"
+    )))
+  )
+}
+
+#' Render a Graphviz diagram
+#'
+#' @param code The Graphviz DOT code
+#' @return HTML tags for rendering the diagram
+#' @keywords internal
+render_graphviz <- function(code) {
+  diagram_id <- paste0("graphviz-", sample(10000:99999, 1))
+  tags$div(
+    id = diagram_id,
+    style = "width: 100%; height: 100%; min-height: 400px;",
+    tags$script(HTML(paste0(
+      "setTimeout(function() { renderGraphvizDiagram('",
+      diagram_id,
+      "', `",
+      gsub("`", "\\`", code),
+      "`); }, 500);"
+    )))
+  )
+}
+
+#' Render diagram output with error handling
+#'
+#' @param code The diagram code
+#' @param diagram_type The type of diagram ("mermaid" or "graphviz")
+#' @param session The Shiny session object
+#' @return Rendered diagram UI or error message
+#' @keywords internal
+render_diagram_output <- function(code, diagram_type, session) {
+  on.exit(session$sendCustomMessage(
+    "play_audio",
+    list(selector = "#shutter")
+  ))
+
+  tryCatch(
+    {
+      if (diagram_type == "graphviz") {
+        render_graphviz(code)
+      } else {
+        render_mermaid(code)
+      }
+    },
+    error = function(e) {
+      tags$div(
+        style = "color: red; padding: 20px;",
+        "Error rendering diagram: ",
+        conditionMessage(e)
+      )
+    }
+  )
+}
+
+#' Setup copy to clipboard button handler
+#'
+#' @param input The Shiny input object
+#' @param session The Shiny session object
+#' @param last_code Reactive value containing the diagram code
+#' @keywords internal
+setup_copy_button_handler <- function(input, session, last_code) {
+  observeEvent(input$copy_code, {
+    req(last_code())
+    code_to_copy <- last_code()
+
+    # Send the code to the browser for copying
+    session$sendCustomMessage(
+      "copy_to_clipboard",
+      list(text = code_to_copy)
+    )
+
+    # Show a temporary notification
+    showNotification(
+      "Code copied to clipboard!",
+      type = "message",
+      duration = 2
+    )
+  })
+}
+
+#' Create diagram generation tool for ellmer
+#'
+#' @param last_code Reactive value to store the diagram code
+#' @param last_diagram_type Reactive value to store the diagram type
+#' @param debug Logical; if TRUE, enables debug logging
+#' @return An ellmer tool object
+#' @keywords internal
+create_diagram_tool <- function(last_code, last_diagram_type, debug = FALSE) {
+  generate_diagram <- function(code, diagram_type) {
+    attr(code, "rnd") <- stats::runif(1) # Force re-evaluation even if code is the same
+    last_code(code)
+    last_diagram_type(diagram_type)
+
+    if (debug) {
+      message(sprintf(
+        "Generating %s diagram with code:\n%s",
+        diagram_type,
+        code
+      ))
+    }
+
+    NULL
+  }
+
+  ellmer::tool(
+    generate_diagram,
+    "Generate a diagram",
+    arguments = list(
+      code = type_string(
+        "The diagram code (Mermaid or Graphviz DOT syntax)"
+      ),
+      diagram_type = type_string(
+        "The type of diagram: 'mermaid' for Mermaid diagrams, 'graphviz' for Graphviz/DOT diagrams"
+      )
+    )
+  )
+}
+
+# Exported Functions ------------------------------------------------------
+
 #' Interactive Shiny app that generates Mermaid and Graphviz diagrams from voice commands using
 #' GPT-4o Realtime.
 #'
@@ -173,57 +312,11 @@ diagrambot <- function(debug = FALSE) {
 
     append_transcript(greeting, clear = TRUE)
 
-    generate_diagram <- function(code, diagram_type) {
-      attr(code, "rnd") <- stats::runif(1) # Force re-evaluation even if code is the same
-      last_code(code)
-      last_diagram_type(diagram_type)
-      NULL
-    }
-
-    generate_diagram_tool <- ellmer::tool(
-      generate_diagram,
-      "Generate a diagram",
-      arguments = list(
-        code = type_string(
-          "The diagram code (Mermaid or Graphviz DOT syntax)"
-        ),
-        diagram_type = type_string(
-          "The type of diagram: 'mermaid' for Mermaid diagrams, 'graphviz' for Graphviz/DOT diagrams"
-        )
-      )
+    generate_diagram_tool <- create_diagram_tool(
+      last_code,
+      last_diagram_type,
+      debug = FALSE
     )
-
-    # Rendering function for Mermaid diagrams
-    render_mermaid <- function(code) {
-      diagram_id <- paste0("mermaid-", sample(10000:99999, 1))
-      tags$div(
-        id = diagram_id,
-        style = "width: 100%; height: 100%; min-height: 400px;",
-        tags$script(HTML(paste0(
-          "setTimeout(function() { renderMermaidDiagram('",
-          diagram_id,
-          "', `",
-          gsub("`", "\\`", code),
-          "`); }, 500);"
-        )))
-      )
-    }
-
-    # Rendering function for Graphviz diagrams
-    render_graphviz <- function(code) {
-      diagram_id <- paste0("graphviz-", sample(10000:99999, 1))
-      tags$div(
-        id = diagram_id,
-        style = "width: 100%; height: 100%; min-height: 400px;",
-        tags$script(HTML(paste0(
-          "setTimeout(function() { renderGraphvizDiagram('",
-          diagram_id,
-          "', `",
-          gsub("`", "\\`", code),
-          "`); }, 500);"
-        )))
-      )
-    }
 
     # Pricing for GPT-4 Realtime API
     pricing_gpt4_realtime <- c(
@@ -398,27 +491,7 @@ diagrambot <- function(debug = FALSE) {
       code <- last_code()
       diagram_type <- last_diagram_type()
 
-      on.exit(session$sendCustomMessage(
-        "play_audio",
-        list(selector = "#shutter")
-      ))
-
-      tryCatch(
-        {
-          if (diagram_type == "graphviz") {
-            render_graphviz(code)
-          } else {
-            render_mermaid(code)
-          }
-        },
-        error = function(e) {
-          tags$div(
-            style = "color: red; padding: 20px;",
-            "Error rendering diagram: ",
-            conditionMessage(e)
-          )
-        }
-      )
+      render_diagram_output(code, diagram_type, session)
     })
 
     output$code_text <- renderText({
@@ -431,23 +504,7 @@ diagrambot <- function(debug = FALSE) {
     })
 
     # Handle copy to clipboard button
-    observeEvent(input$copy_code, {
-      req(last_code())
-      code_to_copy <- last_code()
-
-      # Send the code to the browser for copying
-      session$sendCustomMessage(
-        "copy_to_clipboard",
-        list(text = code_to_copy)
-      )
-
-      # Show a temporary notification
-      showNotification(
-        "Code copied to clipboard!",
-        type = "message",
-        duration = 2
-      )
-    })
+    setup_copy_button_handler(input, session, last_code)
   }
 
   shinyApp(ui, server)
@@ -621,70 +678,13 @@ diagrambot_chat <- function(debug = FALSE) {
       model = "gpt-4o"
     )
 
-    # Define the generate_diagram tool
-    generate_diagram <- function(code, diagram_type) {
-      attr(code, "rnd") <- stats::runif(1) # Force re-evaluation even if code is the same
-      last_code(code)
-      last_diagram_type(diagram_type)
-
-      if (debug) {
-        message(sprintf(
-          "Generating %s diagram with code:\n%s",
-          diagram_type,
-          code
-        ))
-      }
-
-      NULL
-    }
-
-    generate_diagram_tool <- ellmer::tool(
-      generate_diagram,
-      "Generate a diagram",
-      arguments = list(
-        code = type_string(
-          "The diagram code (Mermaid or Graphviz DOT syntax)"
-        ),
-        diagram_type = type_string(
-          "The type of diagram: 'mermaid' for Mermaid diagrams, 'graphviz' for Graphviz/DOT diagrams"
-        )
-      )
+    # Define and register the generate_diagram tool
+    generate_diagram_tool <- create_diagram_tool(
+      last_code,
+      last_diagram_type,
+      debug = debug
     )
-
-    # Register the tool with the chat
     chat$register_tool(generate_diagram_tool)
-
-    # Rendering function for Mermaid diagrams
-    render_mermaid <- function(code) {
-      diagram_id <- paste0("mermaid-", sample(10000:99999, 1))
-      tags$div(
-        id = diagram_id,
-        style = "width: 100%; height: 100%; min-height: 400px;",
-        tags$script(HTML(paste0(
-          "setTimeout(function() { renderMermaidDiagram('",
-          diagram_id,
-          "', `",
-          gsub("`", "\\`", code),
-          "`); }, 500);"
-        )))
-      )
-    }
-
-    # Rendering function for Graphviz diagrams
-    render_graphviz <- function(code) {
-      diagram_id <- paste0("graphviz-", sample(10000:99999, 1))
-      tags$div(
-        id = diagram_id,
-        style = "width: 100%; height: 100%; min-height: 400px;",
-        tags$script(HTML(paste0(
-          "setTimeout(function() { renderGraphvizDiagram('",
-          diagram_id,
-          "', `",
-          gsub("`", "\\`", code),
-          "`); }, 500);"
-        )))
-      )
-    }
 
     # Handle user input from chat
     observeEvent(input$chat_user_input, {
@@ -703,27 +703,7 @@ diagrambot_chat <- function(debug = FALSE) {
       code <- last_code()
       diagram_type <- last_diagram_type()
 
-      on.exit(session$sendCustomMessage(
-        "play_audio",
-        list(selector = "#shutter")
-      ))
-
-      tryCatch(
-        {
-          if (diagram_type == "graphviz") {
-            render_graphviz(code)
-          } else {
-            render_mermaid(code)
-          }
-        },
-        error = function(e) {
-          tags$div(
-            style = "color: red; padding: 20px;",
-            "Error rendering diagram: ",
-            conditionMessage(e)
-          )
-        }
-      )
+      render_diagram_output(code, diagram_type, session)
     })
 
     # Show the diagram code
@@ -733,23 +713,7 @@ diagrambot_chat <- function(debug = FALSE) {
     })
 
     # Handle copy to clipboard button
-    observeEvent(input$copy_code, {
-      req(last_code())
-      code_to_copy <- last_code()
-
-      # Send the code to the browser for copying
-      session$sendCustomMessage(
-        "copy_to_clipboard",
-        list(text = code_to_copy)
-      )
-
-      # Show a temporary notification
-      showNotification(
-        "Code copied to clipboard!",
-        type = "message",
-        duration = 2
-      )
-    })
+    setup_copy_button_handler(input, session, last_code)
   }
 
   shinyApp(ui, server)
