@@ -1,6 +1,6 @@
 Package: diagrambot
 Title: Voice Assistant for Mermaid and Graphviz Diagrams
-Version: 0.0.0.9000
+Version: 0.0.1
 Authors@R: 
     person("First", "Last", , "first.last@example.com", role = c("aut", "cre"))
 Description: Interactive Shiny app that generates Mermaid and Graphviz diagrams from voice commands using GPT-4o Realtime. Supports flowcharts, sequence diagrams, network graphs, organizational charts, and more.
