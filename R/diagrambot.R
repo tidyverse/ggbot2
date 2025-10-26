@@ -60,7 +60,6 @@ diagrambot <- function(debug = FALSE) {
     style = "--bslib-spacer: 1rem; padding-bottom: 0;",
     sidebar = sidebar(
       helpText("Session cost:", textOutput("session_cost", inline = TRUE)),
-      br(),
       output_markdown_stream("response_text")
     ),
     # Settings button in top right corner
