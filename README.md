@@ -41,6 +41,16 @@ diagrambot::diagrambot_voice()
 
 This interface uses GPT-4o Realtime for voice interactions. Click the microphone button to speak, or use push-to-talk by clicking and holding the mic or holding the spacebar key.
 
+#### Personal Instructions
+
+The voice interface includes a **Personal Instructions** feature (accessible via the gear icon ⚙️ in the top-right corner). Use this to add your own context or preferences that will be included in every conversation:
+
+- Add domain-specific terminology (e.g., "I work in healthcare and prefer medical terminology")
+- Specify preferred diagram styles or conventions
+- Include project-specific context that should always be considered
+
+Your personal instructions are saved locally in your browser and persist across sessions. Note: You'll need to refresh the page after saving instructions for them to take effect.
+
 ### Chat Interface
 
 For a text-based chat interface, use `diagrambot_chat()`:
@@ -50,6 +60,17 @@ diagrambot::diagrambot_chat()
 ```
 
 This interface uses `ellmer` and `shinychat` to provide a traditional text chat experience. It's great for when you want to type your requests or when voice isn't convenient.
+
+#### Pasting Context Directly
+
+In the chat interface, you can **paste context directly** into your messages to provide additional information. For example:
+
+- Paste code snippets you want to visualize
+- Include data structures or system architectures
+- Add meeting notes or requirements documents
+- Provide examples of desired output
+
+Simply paste your context into the chat input along with your request, and the AI will use it to generate more accurate and relevant diagrams. This is especially useful for one-time contexts that don't need to be saved permanently.
 
 ### Diagram Types
 
