@@ -23,7 +23,14 @@ globalVariables(c(
   "observeEvent",
   "actionButton",
   "icon",
-  "div"
+  "div",
+  "showModal",
+  "modalDialog",
+  "textAreaInput",
+  "helpText",
+  "modalButton",
+  "tagList",
+  "removeModal"
 ))
 
 #' Interactive Shiny app that generates Mermaid and Graphviz diagrams from voice commands using
@@ -55,6 +62,18 @@ diagrambot <- function(debug = FALSE) {
       helpText("Session cost:", textOutput("session_cost", inline = TRUE)),
       br(),
       output_markdown_stream("response_text")
+    ),
+    # Settings button in top right corner
+    tags$div(
+      style = "position: fixed; top: 10px; right: 20px; z-index: 100001;",
+      actionButton(
+        "settings_btn",
+        label = NULL,
+        icon = shiny::icon("gear"),
+        class = "btn-default",
+        style = "margin-left: auto; padding: 0.2rem 0.4rem; font-size: 1.1rem; height: 2rem; width: 2rem; min-width: 2rem; border: none; background: transparent; color: #495057; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: none;",
+        title = "Personal Instructions"
+      )
     ),
     card(
       full_screen = TRUE,
@@ -97,6 +116,35 @@ diagrambot <- function(debug = FALSE) {
         "www",
         "diagram-renderers.js",
         package = "diagrambot"
+      )),
+      tags$script(HTML(
+        "
+        // Local storage helper functions
+        function saveInstructionsToLocalStorage(instructions) {
+          console.log('Saving to localStorage:', instructions);
+          localStorage.setItem('diagrambot_instructions', instructions);
+          console.log('Saved. Verifying:', localStorage.getItem('diagrambot_instructions'));
+        }
+        function getInstructionsFromLocalStorage() {
+          var instructions = localStorage.getItem('diagrambot_instructions') || '';
+          console.log('Loading from localStorage:', instructions);
+          return instructions;
+        }
+
+        // Send initial instructions from localStorage to Shiny after Shiny is ready
+        $(document).on('shiny:connected', function() {
+          console.log('Shiny connected, loading instructions...');
+          var storedInstructions = getInstructionsFromLocalStorage();
+          console.log('Sending to Shiny:', storedInstructions);
+          Shiny.setInputValue('initial_instructions', storedInstructions, {priority: 'event'});
+        });
+
+        // Handle save_instructions message from Shiny
+        Shiny.addCustomMessageHandler('save_instructions', function(data) {
+          console.log('Received save_instructions message:', data);
+          saveInstructionsToLocalStorage(data.instructions);
+        });
+      "
       ))
     )
   )
@@ -110,6 +158,37 @@ diagrambot <- function(debug = FALSE) {
     last_code <- reactiveVal()
     last_diagram_type <- reactiveVal("mermaid")
     running_cost <- reactiveVal(0) # Cost of tokens used in the session, in dollars
+    user_instructions <- reactiveVal("") # Store user's personal instructions
+    instructions_loaded <- reactiveVal(FALSE) # Track if instructions have been loaded
+
+    # Load instructions from localStorage when app starts
+    observeEvent(
+      input$initial_instructions,
+      {
+        message(
+          "observeEvent fired: initial_instructions = '",
+          input$initial_instructions,
+          "'"
+        )
+        if (
+          !is.null(input$initial_instructions) &&
+            nchar(input$initial_instructions) > 0
+        ) {
+          user_instructions(input$initial_instructions)
+          message(
+            "Loaded instructions from localStorage: ",
+            input$initial_instructions
+          )
+        } else {
+          message("No instructions found in localStorage (empty or NULL)")
+        }
+        instructions_loaded(TRUE)
+        message("instructions_loaded set to TRUE")
+      },
+      once = TRUE,
+      ignoreNULL = FALSE,
+      priority = 1000
+    ) # High priority to run first
 
     greeting <- "Welcome to diagrambot!\n\nYou're currently muted; click the mic button to unmute, click-and-hold the mic for push-to-talk, or hold the spacebar key for push-to-talk."
 
@@ -176,63 +255,7 @@ diagrambot <- function(debug = FALSE) {
       )
     }
 
-    realtime_controls <- realtime_server(
-      "realtime1",
-      voice = "cedar",
-      instructions = prompt,
-      tools = list(generate_diagram_tool),
-      speed = 1.1,
-      debug = debug
-    )
-
-    # Handle function call start - show notification
-    realtime_controls$on("conversation.item.added", function(event) {
-      if (event$item$type == "function_call") {
-        shiny::showNotification(
-          "Generating diagram, please wait...",
-          id = event$item$id,
-          closeButton = FALSE
-        )
-      }
-    })
-
-    # Handle function call completion - remove notification
-    realtime_controls$on("conversation.item.done", function(event) {
-      if (event$item$type == "function_call") {
-        shiny::removeNotification(id = event$item$id)
-      }
-    })
-
-    # Handle new messages - clear transcript
-    realtime_controls$on("response.created", function(event) {
-      append_transcript("", clear = TRUE)
-    })
-
-    # Handle text streaming
-    realtime_controls$on(
-      "response.output_audio_transcript.delta",
-      function(event) {
-        append_transcript(event$delta)
-      }
-    )
-
-    realtime_controls$on("response.done", function(event) {
-      usage <- event$response$usage
-      current_response <- c(
-        input_text = usage$input_token_details$text_tokens,
-        input_audio = usage$input_token_details$audio_tokens,
-        input_image = usage$input_token_details$image_tokens,
-        input_text_cached = usage$input_token_details$cached_tokens_details$text_tokens,
-        input_audio_cached = usage$input_token_details$cached_tokens_details$audio_tokens,
-        input_image_cached = usage$input_token_details$cached_tokens_details$image_tokens,
-        output_text = usage$output_token_details$text_tokens,
-        output_audio = usage$output_token_details$audio_tokens
-      )
-
-      cost <- sum(current_response * pricing_gpt4_realtime)
-      running_cost(isolate(running_cost()) + cost)
-    })
-
+    # Pricing for GPT-4 Realtime API
     pricing_gpt4_realtime <- c(
       input_text = 4 / 1e6,
       input_audio = 32 / 1e6,
@@ -243,6 +266,162 @@ diagrambot <- function(debug = FALSE) {
       output_text = 16 / 1e6,
       output_audio = 64 / 1e6
     )
+
+    # Build the complete prompt with user instructions
+    build_complete_prompt <- function() {
+      base_prompt <- prompt
+      user_instr <- user_instructions()
+
+      if (nchar(user_instr) > 0) {
+        paste0(
+          base_prompt,
+          "\n\n## Additional User Context\n\n",
+          user_instr
+        )
+      } else {
+        base_prompt
+      }
+    }
+
+    # Create realtime server after instructions are loaded
+    observeEvent(
+      instructions_loaded(),
+      {
+        req(instructions_loaded())
+
+        message("Creating realtime server...")
+        message("User instructions: '", user_instructions(), "'")
+        complete_prompt <- build_complete_prompt()
+        message(
+          "Complete prompt length: ",
+          nchar(complete_prompt),
+          " characters"
+        )
+        if (debug) {
+          message("Full prompt: ", complete_prompt)
+        }
+
+        # Create realtime server with current prompt (only called once on startup)
+        realtime_controls <- realtime_server(
+          "realtime1",
+          voice = "cedar",
+          instructions = build_complete_prompt(),
+          tools = list(generate_diagram_tool),
+          speed = 1.1,
+          debug = debug
+        )
+
+        # Set up event handlers
+        # Handle function call start - show notification
+        realtime_controls$on("conversation.item.added", function(event) {
+          if (event$item$type == "function_call") {
+            shiny::showNotification(
+              "Generating diagram, please wait...",
+              id = event$item$id,
+              closeButton = FALSE
+            )
+          }
+        })
+
+        # Handle function call completion - remove notification
+        realtime_controls$on("conversation.item.done", function(event) {
+          if (event$item$type == "function_call") {
+            shiny::removeNotification(id = event$item$id)
+          }
+        })
+
+        # Handle new messages - clear transcript
+        realtime_controls$on("response.created", function(event) {
+          append_transcript("", clear = TRUE)
+        })
+
+        # Handle text streaming
+        realtime_controls$on(
+          "response.output_audio_transcript.delta",
+          function(event) {
+            append_transcript(event$delta)
+          }
+        )
+
+        realtime_controls$on("response.done", function(event) {
+          usage <- event$response$usage
+          current_response <- c(
+            input_text = usage$input_token_details$text_tokens,
+            input_audio = usage$input_token_details$audio_tokens,
+            input_image = usage$input_token_details$image_tokens,
+            input_text_cached = usage$input_token_details$cached_tokens_details$text_tokens,
+            input_audio_cached = usage$input_token_details$cached_tokens_details$audio_tokens,
+            input_image_cached = usage$input_token_details$cached_tokens_details$image_tokens,
+            output_text = usage$output_token_details$text_tokens,
+            output_audio = usage$output_token_details$audio_tokens
+          )
+
+          cost <- sum(current_response * pricing_gpt4_realtime)
+          running_cost(isolate(running_cost()) + cost)
+        })
+      },
+      once = TRUE
+    )
+
+    # Show settings modal
+    observeEvent(input$settings_btn, {
+      showModal(modalDialog(
+        title = "Personal Instructions",
+        textAreaInput(
+          "user_instructions_input",
+          "Add your personal context or instructions:",
+          value = user_instructions(),
+          placeholder = "e.g., I work in healthcare and prefer medical terminology...",
+          rows = 8,
+          width = "100%"
+        ),
+        helpText(
+          "These instructions will be added to the AI's system prompt. ",
+          "You'll need to refresh the page to apply the changes."
+        ),
+        footer = tagList(
+          modalButton("Cancel"),
+          actionButton(
+            "save_instructions",
+            "Save & Apply",
+            class = "btn-primary"
+          )
+        ),
+        size = "m",
+        easyClose = TRUE
+      ))
+    })
+
+    # Handle saving instructions
+    observeEvent(input$save_instructions, {
+      new_instructions <- input$user_instructions_input
+
+      # Update instructions in R
+      user_instructions(new_instructions)
+
+      # Save to localStorage via JavaScript
+      session$sendCustomMessage(
+        "save_instructions",
+        list(instructions = new_instructions)
+      )
+
+      # Close modal
+      removeModal()
+
+      # Show notification that refresh is needed
+      showNotification(
+        HTML(
+          paste0(
+            "Personal instructions saved! ",
+            "<strong>Please refresh the page</strong> to apply the changes. ",
+            "(The instructions will be used on the next session.)"
+          )
+        ),
+        type = "message",
+        duration = NULL, # Don't auto-dismiss
+        closeButton = TRUE
+      )
+    })
 
     output$diagram_output <- renderUI({
       req(last_code())
@@ -463,11 +642,6 @@ diagrambot_chat <- function(debug = FALSE) {
   )
 
   server <- function(input, output, session) {
-    # Clean up resource path when session ends
-    session$onSessionEnded(function() {
-      shiny::removeResourcePath("diagrambot")
-    })
-
     last_code <- reactiveVal()
     last_diagram_type <- reactiveVal("mermaid")
 
