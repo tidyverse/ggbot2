@@ -150,11 +150,6 @@ diagrambot <- function(debug = FALSE) {
   )
 
   server <- function(input, output, session) {
-    # Clean up resource path when session ends
-    session$onSessionEnded(function() {
-      shiny::removeResourcePath("diagrambot")
-    })
-
     last_code <- reactiveVal()
     last_diagram_type <- reactiveVal("mermaid")
     running_cost <- reactiveVal(0) # Cost of tokens used in the session, in dollars
