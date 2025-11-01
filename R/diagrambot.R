@@ -6,6 +6,7 @@
 #' @importFrom htmltools tags HTML
 #' @importFrom jsonlite toJSON
 #' @importFrom shiny addResourcePath includeScript
+#' @importFrom magrittr %>%
 NULL
 
 globalVariables(c(
@@ -32,6 +33,229 @@ globalVariables(c(
   "tagList",
   "removeModal"
 ))
+
+#' Generate external links for diagrams
+#'
+#' @param code The diagram code
+#' @param diagram_type The type of diagram ("mermaid" or "graphviz")
+#' @return HTML content with external links
+#' @keywords internal
+generate_external_links_content <- function(code, diagram_type) {
+  # Helper function to convert base64 to base64url
+  base64_to_base64url <- function(base64_str) {
+    base64_str %>%
+      gsub("\\+", "-", .) %>%
+      gsub("/", "_", .) %>%
+      gsub("=+$", "", .)
+  }
+
+  # Helper function to create URL-safe encoding for Kroki
+  # Kroki requires deflate + base64url encoding as per their documentation
+  create_kroki_encoding <- function(code) {
+    # Use R's memCompress which should be compatible with zlib.compress
+    # The "gzip" type in R is actually zlib compression
+    compressed <- memCompress(charToRaw(code), type = "gzip")
+    base64_encoded <- base64enc::base64encode(compressed)
+    return(base64_to_base64url(base64_encoded))
+  }
+
+  if (diagram_type == "mermaid") {
+    # Create Mermaid Ink link using base64url encoding
+    mermaid_ink_encoded <- base64enc::base64encode(charToRaw(code)) %>%
+      base64_to_base64url()
+    mermaid_ink_url <- paste0("https://mermaid.ink/img/", mermaid_ink_encoded)
+
+    # Create Mermaid Live Editor link using JSON format as per GitHub discussion #1291
+    # The data should be a JSON object with code and mermaid theme
+    mermaid_json <- jsonlite::toJSON(
+      list(
+        code = code,
+        mermaid = list(theme = "default")
+      ),
+      auto_unbox = TRUE
+    )
+
+    mermaid_live_encoded <- base64enc::base64encode(charToRaw(mermaid_json)) %>%
+      base64_to_base64url()
+    mermaid_live_url <- paste0(
+      "https://mermaid.live/edit#base64:",
+      mermaid_live_encoded
+    )
+
+    tagList(
+      tags$div(
+        class = "mb-3",
+        tags$h6(
+          tags$i(class = "fas fa-image me-2"),
+          "Mermaid Ink (Image)"
+        ),
+        tags$p(
+          class = "small text-muted",
+          "Direct link to PNG image - great for embedding in documents"
+        ),
+        tags$div(
+          class = "input-group",
+          tags$input(
+            type = "text",
+            class = "form-control font-monospace small",
+            value = mermaid_ink_url,
+            readonly = TRUE,
+            onclick = "this.select()"
+          ),
+          tags$button(
+            class = "btn btn-outline-secondary",
+            type = "button",
+            onclick = paste0(
+              "navigator.clipboard.writeText('",
+              mermaid_ink_url,
+              "')"
+            ),
+            tags$i(class = "fas fa-copy"),
+            " Copy"
+          ),
+          tags$button(
+            class = "btn btn-primary",
+            type = "button",
+            onclick = paste0("window.open('", mermaid_ink_url, "', '_blank')"),
+            tags$i(class = "fas fa-external-link"),
+            " Open"
+          )
+        )
+      ),
+      tags$div(
+        class = "mb-3",
+        tags$h6(
+          tags$i(class = "fas fa-edit me-2"),
+          "Mermaid Live Editor"
+        ),
+        tags$p(
+          class = "small text-muted",
+          "Interactive editor for viewing and editing your diagram"
+        ),
+        tags$div(
+          class = "input-group",
+          tags$input(
+            type = "text",
+            class = "form-control font-monospace small",
+            value = mermaid_live_url,
+            readonly = TRUE,
+            onclick = "this.select()"
+          ),
+          tags$button(
+            class = "btn btn-outline-secondary",
+            type = "button",
+            onclick = paste0(
+              "navigator.clipboard.writeText('",
+              mermaid_live_url,
+              "')"
+            ),
+            tags$i(class = "fas fa-copy"),
+            " Copy"
+          ),
+          tags$button(
+            class = "btn btn-primary",
+            type = "button",
+            onclick = paste0("window.open('", mermaid_live_url, "', '_blank')"),
+            tags$i(class = "fas fa-external-link"),
+            " Open"
+          )
+        )
+      )
+    )
+  } else if (diagram_type == "graphviz") {
+    # Create Kroki links using deflate+base64url encoding as required by Kroki
+    encoded_code <- create_kroki_encoding(code)
+    kroki_svg_url <- paste0("https://kroki.io/graphviz/svg/", encoded_code)
+    kroki_png_url <- paste0("https://kroki.io/graphviz/png/", encoded_code)
+
+    tagList(
+      tags$div(
+        class = "mb-3",
+        tags$h6(
+          tags$i(class = "fas fa-vector-square me-2"),
+          "Kroki (SVG)"
+        ),
+        tags$p(
+          class = "small text-muted",
+          "Scalable vector graphics - perfect for high-quality displays"
+        ),
+        tags$div(
+          class = "input-group",
+          tags$input(
+            type = "text",
+            class = "form-control font-monospace small",
+            value = kroki_svg_url,
+            readonly = TRUE,
+            onclick = "this.select()"
+          ),
+          tags$button(
+            class = "btn btn-outline-secondary",
+            type = "button",
+            onclick = paste0(
+              "navigator.clipboard.writeText('",
+              kroki_svg_url,
+              "')"
+            ),
+            tags$i(class = "fas fa-copy"),
+            " Copy"
+          ),
+          tags$button(
+            class = "btn btn-primary",
+            type = "button",
+            onclick = paste0("window.open('", kroki_svg_url, "', '_blank')"),
+            tags$i(class = "fas fa-external-link"),
+            " Open"
+          )
+        )
+      ),
+      tags$div(
+        class = "mb-3",
+        tags$h6(
+          tags$i(class = "fas fa-image me-2"),
+          "Kroki (PNG)"
+        ),
+        tags$p(
+          class = "small text-muted",
+          "Portable network graphics - ideal for embedding in documents"
+        ),
+        tags$div(
+          class = "input-group",
+          tags$input(
+            type = "text",
+            class = "form-control font-monospace small",
+            value = kroki_png_url,
+            readonly = TRUE,
+            onclick = "this.select()"
+          ),
+          tags$button(
+            class = "btn btn-outline-secondary",
+            type = "button",
+            onclick = paste0(
+              "navigator.clipboard.writeText('",
+              kroki_png_url,
+              "')"
+            ),
+            tags$i(class = "fas fa-copy"),
+            " Copy"
+          ),
+          tags$button(
+            class = "btn btn-primary",
+            type = "button",
+            onclick = paste0("window.open('", kroki_png_url, "', '_blank')"),
+            tags$i(class = "fas fa-external-link"),
+            " Open"
+          )
+        )
+      )
+    )
+  } else {
+    tags$div(
+      class = "alert alert-info",
+      tags$i(class = "fas fa-info-circle me-2"),
+      "No external links available for this diagram type"
+    )
+  }
+}
 
 # Helper Functions --------------------------------------------------------
 
@@ -231,8 +455,15 @@ diagrambot <- function(debug = FALSE) {
               "copy_code",
               "Copy to Clipboard",
               icon = icon("copy"),
-              style = "padding: 2px 8px; font-size: 12px; margin-top: -2px;",
+              style = "padding: 2px 8px; font-size: 12px; margin-top: -2px; margin-right: 5px;",
               class = "btn-outline-secondary btn-sm"
+            ),
+            actionButton(
+              "external_links",
+              "External Links",
+              icon = icon("external-link"),
+              style = "padding: 2px 8px; font-size: 12px; margin-top: -2px;",
+              class = "btn-outline-primary btn-sm"
             )
           )
         ),
@@ -486,6 +717,31 @@ diagrambot <- function(debug = FALSE) {
       )
     })
 
+    # Handle external links button
+    observeEvent(input$external_links, {
+      req(last_code())
+      code <- last_code()
+      diagram_type <- last_diagram_type()
+
+      # Generate the external links content
+      links_content <- generate_external_links_content(code, diagram_type)
+
+      # Show Shiny modal with external links
+      showModal(modalDialog(
+        title = tagList(
+          tags$i(class = "fas fa-external-link me-2"),
+          "External Links"
+        ),
+        tags$p("Share your diagram using these external services:"),
+        links_content,
+        footer = tagList(
+          modalButton("Close")
+        ),
+        size = "l",
+        easyClose = TRUE
+      ))
+    })
+
     output$diagram_output <- renderUI({
       req(last_code())
       code <- last_code()
@@ -640,8 +896,15 @@ diagrambot_chat <- function(debug = FALSE) {
                 "copy_code",
                 "Copy to Clipboard",
                 icon = icon("copy"),
-                style = "padding: 2px 8px; font-size: 12px; margin-top: -2px;",
+                style = "padding: 2px 8px; font-size: 12px; margin-top: -2px; margin-right: 5px;",
                 class = "btn-outline-secondary btn-sm"
+              ),
+              actionButton(
+                "external_links",
+                "External Links",
+                icon = icon("external-link"),
+                style = "padding: 2px 8px; font-size: 12px; margin-top: -2px;",
+                class = "btn-outline-primary btn-sm"
               )
             )
           ),
@@ -714,6 +977,31 @@ diagrambot_chat <- function(debug = FALSE) {
 
     # Handle copy to clipboard button
     setup_copy_button_handler(input, session, last_code)
+
+    # Handle external links button
+    observeEvent(input$external_links, {
+      req(last_code())
+      code <- last_code()
+      diagram_type <- last_diagram_type()
+
+      # Generate the external links content
+      links_content <- generate_external_links_content(code, diagram_type)
+
+      # Show Shiny modal with external links
+      showModal(modalDialog(
+        title = tagList(
+          tags$i(class = "fas fa-external-link me-2"),
+          "External Links"
+        ),
+        tags$p("Share your diagram using these external services:"),
+        links_content,
+        footer = tagList(
+          modalButton("Close")
+        ),
+        size = "l",
+        easyClose = TRUE
+      ))
+    })
   }
 
   shinyApp(ui, server)
