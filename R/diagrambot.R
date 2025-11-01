@@ -856,6 +856,11 @@ build_prompt <- function() {
 #' Interactive Shiny app that generates Mermaid and Graphviz diagrams from text chat using
 #' ellmer and shinychat.
 #'
+#' This interface provides a traditional text-based chat experience with real-time
+#' cost and token usage tracking. The sidebar displays cumulative session cost and
+#' token consumption, updated automatically every 5 seconds using ellmer's built-in
+#' usage tracking methods.
+#'
 #' @param debug Logical; if TRUE, enables verbose logging.
 #'
 #' @return A Shiny app object. If this function is called from the R console,
@@ -880,11 +885,17 @@ diagrambot_chat <- function(debug = FALSE) {
       fillable = TRUE,
       sidebar = sidebar(
         width = 350,
+        helpText(
+          "Cost: ",
+          textOutput("session_cost_chat", inline = TRUE),
+          " | Tokens: ",
+          textOutput("session_tokens_chat", inline = TRUE)
+        ),
         card(
           full_screen = TRUE,
           card_header("Diagram"),
           card_body(padding = 0, uiOutput("diagram_output", fill = TRUE)),
-          height = "50vh"
+          height = "45vh"
         ),
         card(
           full_screen = TRUE,
@@ -909,7 +920,7 @@ diagrambot_chat <- function(debug = FALSE) {
             )
           ),
           verbatimTextOutput("code_text"),
-          height = "40vh"
+          height = "35vh"
         )
       ),
       chat_ui(
@@ -949,6 +960,43 @@ diagrambot_chat <- function(debug = FALSE) {
     )
     chat$register_tool(generate_diagram_tool)
 
+    # Reactive values for cost and token tracking
+    session_cost <- reactiveVal(0)
+    session_tokens <- reactiveVal(data.frame(tokens = 0))
+
+    # Function to update cost and token tracking
+    update_usage_tracking <- function() {
+      tryCatch(
+        {
+          # Get cumulative cost
+          cost <- chat$get_cost(include = "all")
+          session_cost(cost)
+
+          # Get token usage
+          tokens_df <- chat$get_tokens(include_system_prompt = FALSE)
+          total_tokens <- if (nrow(tokens_df) > 0) {
+            sum(tokens_df$tokens, na.rm = TRUE)
+          } else {
+            0
+          }
+          session_tokens(data.frame(tokens = total_tokens))
+
+          if (debug) {
+            message(sprintf(
+              "Updated usage - Cost: $%.4f, Tokens: %d",
+              cost,
+              total_tokens
+            ))
+          }
+        },
+        error = function(e) {
+          if (debug) {
+            message(sprintf("Error updating usage tracking: %s", e$message))
+          }
+        }
+      )
+    }
+
     # Handle user input from chat
     observeEvent(input$chat_user_input, {
       if (debug) {
@@ -958,6 +1006,25 @@ diagrambot_chat <- function(debug = FALSE) {
       # Stream the response to the chat UI
       stream <- chat$stream_async(input$chat_user_input)
       chat_append("chat", stream)
+    })
+
+    # Periodically update usage tracking to capture completed responses
+    observe({
+      invalidateLater(5000) # Update every 5 seconds
+      update_usage_tracking()
+    })
+
+    # Output for session cost
+    output$session_cost_chat <- renderText({
+      cost <- session_cost()
+      sprintf("$%.4f", cost)
+    })
+
+    # Output for session tokens
+    output$session_tokens_chat <- renderText({
+      tokens_df <- session_tokens()
+      total_tokens <- if (nrow(tokens_df) > 0) tokens_df$tokens[1] else 0
+      sprintf("%d", total_tokens)
     })
 
     # Render the diagram

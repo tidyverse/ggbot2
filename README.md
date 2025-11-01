@@ -61,6 +61,11 @@ diagrambot::diagrambot_chat()
 
 This interface uses `ellmer` and `shinychat` to provide a traditional text chat experience. It's great for when you want to type your requests or when voice isn't convenient.
 
+**Features:**
+- **Cost & Token Tracking**: Real-time display of session cost and token usage
+- **Streaming Responses**: See AI responses as they're generated
+- **Context Pasting**: Paste context directly into messages (see below)
+
 #### Pasting Context Directly
 
 In the chat interface, you can **paste context directly** into your messages to provide additional information. For example:
