@@ -4,6 +4,7 @@
 #' @import ggplot2
 #' @importFrom shinychat markdown_stream output_markdown_stream
 #' @importFrom shinyrealtime realtime_ui realtime_server
+#' @importFrom grDevices png dev.off
 NULL
 
 globalVariables("yield")
@@ -42,14 +43,32 @@ ggbot <- function(df, debug = FALSE) {
     title = "ggbot2",
     fillable = TRUE,
     style = "--bslib-spacer: 1rem; padding-bottom: 0;",
+    shinyjs::useShinyjs(),
     sidebar = sidebar(
-      helpText("Session cost:", textOutput("session_cost", inline = TRUE)),
+      div(
+        style = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;",
+        helpText("Session cost:", textOutput("session_cost", inline = TRUE)),
+        input_dark_mode(id = "dark_mode", mode = "light")
+      ),
       output_markdown_stream("response_text")
     ),
     card(
       full_screen = TRUE,
-      card_header("Plot"),
-      card_body(padding = 0, plotOutput("plot", fill = TRUE)),
+      card_header(
+        "Plot",
+        class = "d-flex justify-content-between align-items-center",
+        div(
+          style = "display: flex; gap: 0.5rem;",
+          actionButton("history_prev", icon("chevron-left"), class = "btn-sm"),
+          textOutput("history_info", inline = TRUE),
+          actionButton("history_next", icon("chevron-right"), class = "btn-sm"),
+          downloadButton("download_plot", "Download", class = "btn-sm")
+        )
+      ),
+      card_body(
+        padding = 0,
+        uiOutput("plot_container")
+      ),
       height = "66%"
     ),
     layout_columns(
@@ -65,14 +84,30 @@ ggbot <- function(df, debug = FALSE) {
       style = "z-index: 100000; margin-left: auto; margin-right: auto;",
       right = NULL
     ),
-    hidden_audio_el("shutter", system.file("shutter.mp3", package = "ggbot2"))
+    hidden_audio_el("shutter", system.file("shutter.mp3", package = "ggbot2")),
+    tags$script(HTML("
+      // Fix initial mic button state to match muted status
+      setTimeout(function() {
+        var micBtn = document.querySelector('.mic-toggle-btn');
+        if (micBtn) {
+          micBtn.classList.remove('active', 'btn-danger');
+          micBtn.classList.add('btn-secondary');
+        }
+      }, 100);
+    "))
   )
 
   server <- function(input, output, session) {
     last_code <- reactiveVal()
+    last_plotly_code <- reactiveVal()
+    plot_type <- reactiveVal("static") # "static" or "plotly"
     running_cost <- reactiveVal(0) # Cost of tokens used in the session, in dollars
 
-    greeting <- "Welcome to Shiny Realtime!\n\nYou're currently muted; click the mic button to unmute, click-and-hold the mic for push-to-talk, or hold the spacebar key for push-to-talk."
+    # History system
+    plot_history <- reactiveVal(list()) # List of history items: list(code, plot_type, timestamp)
+    history_position <- reactiveVal(0) # 0 = latest/live, 1 = one back, etc.
+
+    greeting <- "Welcome to ggbot2!\n\nClick the mic button to start talking. You can also click-and-hold the mic button (or hold spacebar) for push-to-talk mode."
 
     append_transcript <- function(text, clear = FALSE) {
       markdown_stream(
@@ -87,12 +122,35 @@ ggbot <- function(df, debug = FALSE) {
 
     run_r_plot_code <- function(code) {
       attr(code, "rnd") <- stats::runif(1) # Force re-evaluation even if code is the same
+      plot_type("static")
       last_code(code)
+      last_plotly_code(NULL)
+
+      # Add to history
+      history <- plot_history()
+      history <- c(list(list(code = code, plot_type = "static", timestamp = Sys.time())), history)
+      plot_history(history)
+      history_position(0) # Reset to latest
 
       # Ideally we'd run the code here to check for errors and let the model
       # know about success/failure in a tool response. But we only want to run
       # this code once, and with the environment set up correctly as renderPlot
       # does.
+      NULL
+    }
+
+    run_r_plotly_code <- function(code) {
+      attr(code, "rnd") <- stats::runif(1) # Force re-evaluation even if code is the same
+      plot_type("plotly")
+      last_plotly_code(code)
+      last_code(NULL)
+
+      # Add to history
+      history <- plot_history()
+      history <- c(list(list(code = code, plot_type = "plotly", timestamp = Sys.time())), history)
+      plot_history(history)
+      history_position(0) # Reset to latest
+
       NULL
     }
 
@@ -106,11 +164,21 @@ ggbot <- function(df, debug = FALSE) {
       )
     )
 
+    run_r_plotly_code_tool <- ellmer::tool(
+      run_r_plotly_code,
+      "Run R code that generates an interactive plotly plot",
+      arguments = list(
+        code = type_string(
+          "The R code to run that generates an interactive plotly plot. This should use plotly::ggplotly() to convert a ggplot object to plotly, or use plotly functions directly. The last expression should be the plotly object."
+        )
+      )
+    )
+
     realtime_controls <- realtime_server(
       "realtime1",
       voice = "cedar",
       instructions = prompt,
-      tools = list(run_r_plot_code_tool),
+      tools = list(run_r_plot_code_tool, run_r_plotly_code_tool),
       speed = 1.1,
       debug = debug
     )
@@ -199,8 +267,99 @@ ggbot <- function(df, debug = FALSE) {
       output_audio = 20 / 1e6
     )
 
+    # History navigation
+    observeEvent(input$history_prev, {
+      pos <- history_position()
+      history <- plot_history()
+      if (pos < length(history) - 1) {
+        new_pos <- pos + 1
+        history_position(new_pos)
+        # Load plot from history
+        item <- history[[new_pos + 1]] # +1 because R is 1-indexed
+        if (item$plot_type == "static") {
+          plot_type("static")
+          last_code(item$code)
+          last_plotly_code(NULL)
+        } else {
+          plot_type("plotly")
+          last_plotly_code(item$code)
+          last_code(NULL)
+        }
+      }
+    })
+
+    observeEvent(input$history_next, {
+      pos <- history_position()
+      if (pos > 0) {
+        new_pos <- pos - 1
+        history_position(new_pos)
+        # Load plot from history
+        history <- plot_history()
+        item <- history[[new_pos + 1]] # +1 because R is 1-indexed
+        if (item$plot_type == "static") {
+          plot_type("static")
+          last_code(item$code)
+          last_plotly_code(NULL)
+        } else {
+          plot_type("plotly")
+          last_plotly_code(item$code)
+          last_code(NULL)
+        }
+      }
+    })
+
+    # Update button states
+    observe({
+      pos <- history_position()
+      history <- plot_history()
+
+      # Disable prev if at oldest plot
+      if (pos >= length(history) - 1 || length(history) <= 1) {
+        shinyjs::disable("history_prev")
+      } else {
+        shinyjs::enable("history_prev")
+      }
+
+      # Disable next if at newest plot
+      if (pos <= 0) {
+        shinyjs::disable("history_next")
+      } else {
+        shinyjs::enable("history_next")
+      }
+    })
+
+    output$history_info <- renderText({
+      pos <- history_position()
+      history <- plot_history()
+      if (length(history) == 0) {
+        return("")
+      }
+      paste0((pos + 1), "/", length(history))
+    })
+
+    output$plot_container <- renderUI({
+      if (plot_type() == "plotly") {
+        req(last_plotly_code())
+        if (!requireNamespace("plotly", quietly = TRUE)) {
+          stop("plotly package is required for interactive plots. Install it with install.packages('plotly')")
+        }
+        tagList(
+          plotly::plotlyOutput("interactive_plot", width = "100%", height = "100%"),
+          tags$script(HTML("
+            setTimeout(function() {
+              var audio = document.getElementById('shutter');
+              if (audio) audio.play();
+            }, 500);
+          "))
+        )
+      } else {
+        plotOutput("plot", fill = TRUE, width = "100%", height = "100%")
+      }
+    })
+
     output$plot <- renderPlot(res = 96, {
       req(last_code())
+      req(plot_type() == "static")
       on.exit(session$sendCustomMessage(
         "play_audio",
         list(selector = "#shutter")
@@ -222,14 +381,87 @@ ggbot <- function(df, debug = FALSE) {
       )
     })
 
+    output$interactive_plot <- plotly::renderPlotly({
+      req(last_plotly_code())
+      req(plot_type() == "plotly")
+      if (!requireNamespace("plotly", quietly = TRUE)) {
+        stop("plotly package is required for interactive plots")
+      }
+      eval(parse(text = last_plotly_code()), envir = new.env(parent = globalenv()))
+    })
+
     output$code_text <- renderText({
-      req(last_code())
-      last_code()
+      if (plot_type() == "static") {
+        req(last_code())
+        last_code()
+      } else {
+        req(last_plotly_code())
+        last_plotly_code()
+      }
     })
 
     output$session_cost <- renderText({
       paste0(sprintf("$%.4f", running_cost()))
     })
+
+    output$download_plot <- downloadHandler(
+      filename = function() {
+        current_plot_type <- isolate(plot_type())
+        extension <- if (current_plot_type == "plotly") ".html" else ".png"
+        paste0("ggbot_plot_", format(Sys.time(), "%Y%m%d_%H%M%S"), extension)
+      },
+      content = function(file) {
+        current_plot_type <- isolate(plot_type())
+
+        if (current_plot_type == "static") {
+          code <- isolate(last_code())
+
+          if (is.null(code) || code == "") {
+            stop("No plot available to download. Please generate a plot first.")
+          }
+
+          # 300 DPI with typical plot size (10" x 8")
+          grDevices::png(file, width = 3000, height = 2400, res = 300)
+          tryCatch({
+            result <- eval(parse(text = code), envir = new.env(parent = globalenv()))
+            # Explicitly print if it's a ggplot object
+            if (inherits(result, "ggplot")) {
+              print(result)
+            }
+          }, error = function(e) {
+            if (length(grDevices::dev.list()) > 0) {
+              grDevices::dev.off()
+            }
+            stop("Error generating plot: ", e$message)
+          }, finally = {
+            if (length(grDevices::dev.list()) > 0) {
+              grDevices::dev.off()
+            }
+          })
+
+        } else if (current_plot_type == "plotly") {
+          code <- isolate(last_plotly_code())
+
+          if (is.null(code) || code == "") {
+            stop("No plot available to download. Please generate a plot first.")
+          }
+
+          if (!requireNamespace("plotly", quietly = TRUE)) {
+            stop("plotly package is required")
+          }
+
+          if (!requireNamespace("htmlwidgets", quietly = TRUE)) {
+            stop("htmlwidgets package is required to save interactive plots")
+          }
+
+          # Save interactive plotly as HTML to preserve interactivity
+          plotly_obj <- eval(parse(text = code), envir = new.env(parent = globalenv()))
+          htmlwidgets::saveWidget(plotly_obj, file, selfcontained = TRUE)
+        } else {
+          stop("No plot available to download. Please generate a plot first.")
+        }
+      }
+    )
   }
 
   shinyApp(ui, server)

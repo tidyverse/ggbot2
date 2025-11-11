@@ -15,14 +15,20 @@ Imports:
     ellmer (>= 0.3.0),
     shiny,
     shinychat,
+    shinyjs,
     shinyrealtime (>= 0.1.0.9000),
     withr
 Suggests:
     dplyr,
-    maps
+    htmlwidgets,
+    kaleido,
+    maps,
+    plotly,
+    webshot,
+    webshot2
 Remotes:
     posit-dev/shinyrealtime/pkg-r
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.2
+RoxygenNote: 7.3.3
